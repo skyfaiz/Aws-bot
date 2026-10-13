@@ -97,13 +97,21 @@ class GrowwClient:
                 r = self.http.get(url, headers=self.headers, params=params, timeout=self.timeout)
                 log.debug("GET %s %s -> %s", path, params, r.status_code)
                 if r.status_code in (401, 403):
-                    if self.tm and not refreshed:
+                    fresh = time.time() - self._last_refresh < REFRESH_MIN_INTERVAL and self._last_refresh > 0
+                    if self.tm and not refreshed and not fresh:
                         refreshed = True
                         log.warning("HTTP %s: token rejected, refreshing", r.status_code)
                         self.refresh_token()
                         r = self.http.get(url, headers=self.headers, params=params, timeout=self.timeout)
+                        fresh = True
                     if r.status_code in (401, 403):
-                        raise GrowwAuthError(f"HTTP {r.status_code}: access token invalid or expired ({str(r.text)[:150]})")
+                        body = str(r.text)[:150]
+                        if fresh and r.status_code == 403:
+                            raise GrowwAuthError(
+                                f"HTTP 403 even with a freshly issued token ({body}). The token is valid; Groww is refusing "
+                                f"this request: check the Trading API subscription, or that this segment/instrument is "
+                                f"supported (Groww's docs say MCX is not available in the Trade API). Run /diag.")
+                        raise GrowwAuthError(f"HTTP {r.status_code}: access token invalid or expired ({body})")
                 if r.status_code == 429 or r.status_code >= 500:
                     raise GrowwAPIError(f"HTTP {r.status_code}")
                 r.raise_for_status()

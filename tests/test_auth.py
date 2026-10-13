@@ -117,3 +117,33 @@ def test_telegram_setkeys_and_refreshtoken(cfg, base_dir, monkeypatch):
     assert "fetched" in ctl.handle(1, "refreshtoken", [])[0] and b.client.headers["Authorization"] == "Bearer T3"
     for k in ("GROWW_API_KEY", "GROWW_API_SECRET"):
         monkeypatch.delenv(k, raising=False)
+
+
+def test_403_with_fresh_token_is_reported_as_forbidden_not_expired():
+    h = PostHTTP(gets=[FakeResp(403)] * 2, posts=[FakeResp(200, {"token": "T1"})])
+    c = GrowwClient("", session=h, token_manager=TokenManager("K", "S", http=h))
+    with pytest.raises(GrowwAuthError, match="freshly issued token") as e:
+        c.get_ltp(["MCX_A"])
+    assert len(h.post_calls) == 1 and "/diag" in str(e.value)       # no pointless second token fetch
+
+
+def test_diag_and_auth_backoff(cfg, base_dir):
+    from datetime import timedelta
+    from bot import Bot
+    from core.telegram_control import Controller
+    from tests.test_bot import FakeClient, at
+    c = FakeClient()
+    b = Bot(cfg, client=c, base_dir=base_dir)
+    ctl = Controller(b, base_dir / "c.yaml", base_dir / ".env", "679902", base_dir / "a.json")
+    ctl.handle(1, "login", ["679902"])
+    assert "Equity" in ctl.handle(1, "diag", [])[0] and "FAILED" not in ctl.handle(1, "diag", [])[0]
+    c.error = GrowwAuthError("HTTP 403 forbidden")
+    out = ctl.handle(1, "diag", [])[0]
+    assert out.count("FAILED") == 2
+    # auth failures are retried at most once a minute
+    b.step(at(13, 9, 15))
+    n = len(c.calls)
+    b.step(at(13, 9, 15, 20)); b.step(at(13, 9, 15, 50))
+    assert len(c.calls) == n
+    b.step(at(13, 9, 16, 30))
+    assert len(c.calls) == n + 1

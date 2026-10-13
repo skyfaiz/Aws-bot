@@ -26,6 +26,7 @@ HELP = """Commands
 /set <key> <value> - change a setting, e.g. /set risk.stop_loss.value 25
 /settoken <token> - set a Groww access token directly
 /setkeys <api_key> <api_secret> - set Groww API key + secret (token fetched automatically and renewed daily)
+/diag - test Groww access: equity price vs MCX price
 /refreshtoken - fetch a new token now (after approving the key on the Groww Cloud API Keys page)
 /pause - stop opening new trades
 /resume - allow new trades again
@@ -91,6 +92,8 @@ class Controller:
             return self.set_token(args), True
         if cmd == "setkeys":
             return self.set_keys(args), True
+        if cmd == "diag":
+            return self.diag(), False
         if cmd == "refreshtoken":
             return self.bot.refresh_token(), False
         if cmd not in fn:
@@ -243,6 +246,19 @@ class Controller:
             b.set_token(token)
             b.auth_failed = False
         return "Access token updated (stored in .env, live immediately)." + note
+
+    def diag(self) -> str:
+        b = self.bot
+        out = []
+        for label, syms, seg in (("Equity (NSE_RELIANCE, CASH)", ["NSE_RELIANCE"], "CASH"),
+                                 (f"MCX ({b.fut_symbol}, {b.segment})", [b.fut_symbol or "MCX_CRUDEOIL19OCT26FUT"], b.segment)):
+            try:
+                out.append(f"{label}: OK {b.client.get_ltp(syms, seg)}")
+            except Exception as e:
+                out.append(f"{label}: FAILED {str(e)[:300]}")
+        out.append("If equity works but MCX fails, Groww does not serve MCX to your account/API."
+                   if out[0].split(": ")[1].startswith("OK") and out[1].split(": ")[1].startswith("FAILED") else "")
+        return "\n".join(x for x in out if x)
 
     def set_keys(self, args: list[str]) -> str:
         if len(args) != 2:

@@ -5,7 +5,7 @@ import logging
 import signal as os_signal
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from core.candle_builder import CandleBuilder
@@ -56,6 +56,7 @@ class Bot:
         self.paused = False
         self.squareoff_requested = False
         self.auth_failed = False
+        self._auth_retry_at: datetime | None = None
         self.last_underlying: float | None = None
         self.last_signal: Signal | None = None
         self._last_error: str | None = None
@@ -193,12 +194,15 @@ class Bot:
             return
         self._ensure_day(now)
         self.session_active = True
+        if self.auth_failed and self._auth_retry_at and now < self._auth_retry_at:
+            return
         pos = self.trader.position
         symbols = [self.fut_symbol] + ([pos.contract.groww_symbol] if pos else [])
         try:
             prices = self.client.get_ltp(symbols, self.segment)
         except GrowwAuthError as e:
-            log.critical("AUTH FAILURE: %s -- renew GROWW_ACCESS_TOKEN and restart", e)
+            log.critical("AUTH FAILURE: %s", e)
+            self._auth_retry_at = now + timedelta(seconds=60)
             if not self.auth_failed:
                 self.notify(f"AUTH FAILURE: {e}\nFix: /settoken <token>, or approve your API key on the Groww "
                             f"Cloud API Keys page and send /refreshtoken.")
