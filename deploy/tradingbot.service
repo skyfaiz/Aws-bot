@@ -1,0 +1,19 @@
+[Unit]
+Description=MCX Crude Oil Paper Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tradingbot
+ExecStart=/home/ubuntu/tradingbot/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+EnvironmentFile=/home/ubuntu/tradingbot/.env
+Environment=PYTHONUNBUFFERED=1
+# Bot writes its own logs/bot.log; journald also captures stdout.
+
+[Install]
+WantedBy=multi-user.target
