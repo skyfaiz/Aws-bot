@@ -135,7 +135,38 @@ Coverage:
 
 **Not verified**: behaviour with a real access token (none available), so the API symbol format is taken from the Groww docs examples, not confirmed live.
 
-## Deployment (AWS EC2, Ubuntu 22.04, ap-south-1)
+## Deployment with Docker (recommended)
+
+The image (`Dockerfile`, Python 3.11-slim, pinned `requirements.txt`) makes the runtime identical on your PC and on EC2. Timezone is IST inside the container. `docker-compose.yml` mounts `.env`, `config/`, `instrument.csv`, `logs/` and `data/` from the host, so settings changed with `/set`, the token set with `/settoken`, trade logs, recorded data and candles all survive rebuilds and restarts. The container runs as uid 1000 (same as `ubuntu` on EC2).
+
+Local (any machine with Docker):
+```bash
+cp .env.example .env            # fill TELEGRAM_BOT_TOKEN, GROWW_ACCESS_TOKEN
+mkdir -p logs data
+docker compose run --rm tests   # 35 tests inside the image
+docker compose up -d --build
+docker compose logs -f
+```
+
+EC2 (Ubuntu 22.04, `ap-south-1`, t3.micro/small, SSH open only to your IP):
+```bash
+git clone https://github.com/skyfaiz/Aws-bot.git ~/tradingbot && cd ~/tradingbot
+bash deploy/setup_docker.sh     # installs Docker, builds the image, runs the tests
+nano .env                       # TELEGRAM_BOT_TOKEN=..., GROWW_ACCESS_TOKEN=... (token can also be sent later via /settoken)
+sudo docker compose up -d       # starts now and on every reboot (restart: unless-stopped)
+sudo docker compose logs -f
+```
+Then message the bot `/login 679902` and `/status`.
+
+Operations:
+- Update code: `git pull && sudo docker compose up -d --build`
+- Stop / restart: `sudo docker compose stop` / `sudo docker compose restart` (a 60 s grace period lets the bot close its session cleanly)
+- Pause trading without stopping: `/pause` in Telegram
+- Refresh instruments: replace `instrument.csv`, commit, `git pull`, `sudo docker compose restart`
+- Back up `logs/` and `data/` (trade logs, state, recorded data)
+- Run only one of the Docker container or the systemd units, never both.
+
+## Deployment without Docker (systemd, alternative)
 
 1. Launch a `t3.micro`/`t3.small`, open only SSH (22) from your IP.
 2. Copy the project to `/home/ubuntu/tradingbot` (git clone or `scp -r`). The service file assumes this path and user `ubuntu`. Put `instrument.csv` there too.

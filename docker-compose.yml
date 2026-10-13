@@ -1,0 +1,29 @@
+services:
+  bot:
+    build: .
+    image: aws-bot:latest
+    container_name: tradingbot
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: Asia/Kolkata
+    volumes:
+      # .env is read at start-up and rewritten by /settoken, so it must be a mounted file
+      - ./.env:/app/.env
+      # /set rewrites config.yaml, so keep it on the host
+      - ./config:/app/config
+      - ./instrument.csv:/app/instrument.csv:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # One-off test run inside the same image:  docker compose run --rm tests
+  tests:
+    build: .
+    image: aws-bot:latest
+    profiles: ["tests"]
+    command: ["python", "-m", "pytest", "-q", "tests"]
