@@ -11,7 +11,7 @@ from pathlib import Path
 from core.candle_builder import CandleBuilder
 from core.data_store import DataStore
 from core.config import load_config, load_dotenv
-from core.groww_client import GrowwAPIError, GrowwAuthError, GrowwClient
+from core.groww_client import GrowwAPIError, GrowwAuthError, GrowwClient, TokenManager
 from core.instrument_loader import InstrumentLoader
 from core.option_selector import OptionSelector
 from core.paper_trader import ExitEvent, OpenPosition, PaperTrader
@@ -29,7 +29,8 @@ class Bot:
         self.sess = session or Session(cfg["session"])
         api, ins, cd = cfg["api"], cfg["instrument"], cfg["candles"]
         self.client = client or GrowwClient(api["access_token"], api["base_url"], api["version"],
-                                            api["max_retries"], api["retry_backoff_seconds"])
+                                            api["max_retries"], api["retry_backoff_seconds"],
+                                            token_manager=self._make_token_manager(api))
         self.segment = ins["segment"]
         self.strategy = load_strategy(cfg["strategy"]["name"], cfg["strategy"]["params"])
         self.builder = CandleBuilder(cd["interval_minutes"], cd["max_window"], cd["warmup_candles"], self.sess.open)
@@ -59,6 +60,12 @@ class Bot:
         self.last_signal: Signal | None = None
         self._last_error: str | None = None
         self._restore_state()
+
+    @staticmethod
+    def _make_token_manager(api: dict) -> TokenManager | None:
+        if api.get("api_key") and (api.get("api_secret") or api.get("totp_secret")):
+            return TokenManager(api["api_key"], api.get("api_secret", ""), api.get("totp_secret", ""), api["base_url"])
+        return None
 
     # ── persistence ────────────────────────────────────────────────
     def _save_state(self) -> None:
@@ -193,7 +200,8 @@ class Bot:
         except GrowwAuthError as e:
             log.critical("AUTH FAILURE: %s -- renew GROWW_ACCESS_TOKEN and restart", e)
             if not self.auth_failed:
-                self.notify(f"AUTH FAILURE: {e}\nSend /settoken <new token> to fix.")
+                self.notify(f"AUTH FAILURE: {e}\nFix: /settoken <token>, or approve your API key on the Groww "
+                            f"Cloud API Keys page and send /refreshtoken.")
             self.auth_failed = True
             return
         except GrowwAPIError as e:
@@ -259,8 +267,30 @@ class Bot:
     def set_token(self, token: str) -> None:
         with self.lock:
             if isinstance(self.client, GrowwClient):
-                self.client.headers["Authorization"] = f"Bearer {token}"
+                self.client.set_token(token)
             self.cfg["api"]["access_token"] = token
+            self.auth_failed = False
+
+    def set_credentials(self, api_key: str, secret: str) -> str:
+        """Switch to API key + secret and fetch a token now. Returns a status message."""
+        with self.lock:
+            api = self.cfg["api"]
+            api["api_key"], api["api_secret"], api["totp_secret"] = api_key, secret, ""
+            if isinstance(self.client, GrowwClient):
+                self.client.tm = self._make_token_manager(api)
+            return self.refresh_token()
+
+    def refresh_token(self) -> str:
+        """Force a token fetch via API key/secret (or TOTP). Returns a status message."""
+        with self.lock:
+            if not isinstance(self.client, GrowwClient):
+                return "Token refresh is not available."
+            try:
+                self.client.refresh_token(force=True)
+            except GrowwAuthError as e:
+                return f"Token refresh failed: {e}"
+            self.auth_failed = False
+            return "New Groww access token fetched and active."
 
     def apply_config(self, cfg: dict) -> None:
         """Apply a validated config to the running bot (builds new parts first, then swaps)."""

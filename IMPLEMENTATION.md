@@ -32,7 +32,7 @@ telegram_service.py        Telegram front-end; runs the bot in a background thre
 core/data_store.py         tick/candle/signal recorder with retention
 core/telegram_control.py   command logic (auth, status, set, settoken, pause...)
 core/config_edit.py        comment-preserving edits of config.yaml
-tests/                     35 pytest tests
+tests/                     46 pytest tests
 ```
 
 `halftrend.py` is unchanged.
@@ -76,6 +76,20 @@ Notes:
 - Default `candles.warmup_candles` is now 5 (was 120); the other defaults are unchanged. HalfTrend's ATR smooths over 100 candles, so signals in the first hours are less reliable.
 - The service itself could not be run against Telegram here (no bot token): the command logic is covered by tests, and a start-up with a dummy token reaches Telegram and is rejected as expected.
 
+## Groww authentication
+
+Three ways, in `.env` (all read through `config.yaml`):
+
+| Mode | `.env` | Notes |
+|---|---|---|
+| Fixed token | `GROWW_ACCESS_TOKEN` | expires daily at 6 AM; renew with `/settoken` |
+| API key + secret (approval flow) | `GROWW_API_KEY`, `GROWW_API_SECRET` | bot calls `POST /v1/token/api/access` (checksum = sha256(secret + timestamp)) and renews the token itself whenever Groww answers 401/403 |
+| API key + TOTP | `GROWW_API_KEY`, `GROWW_TOTP_SECRET` | same, using `pyotp` to produce the code |
+
+Groww requires the key to be **approved daily on the Groww Cloud API Keys page**; until then the token request is rejected and the bot sends an `AUTH FAILURE` message. After approving, send `/refreshtoken` (or wait: it retries automatically, at most once per 10 minutes because the endpoint allows 150 calls per day). `/setkeys <api_key> <api_secret>` stores new credentials in `.env` and fetches a token immediately.
+
+Groww's docs state that commodities (MCX) trading via the Trade API is currently not available. The bot only reads prices, and their live-data page lists an MCX example, but if Groww returns errors or no price for the MCX symbols even with a valid token, that is the reason; check `/status` and `logs/bot.log`.
+
 ## Position sizing (lots)
 
 Before this change the bot always bought `instrument.lots` (fixed, default 1). Now:
@@ -118,7 +132,7 @@ Files older than `data.retention_days` (default 30, minimum 7 enforced) are dele
 
 ```
 pip install -r requirements.txt
-python -m pytest -q tests        # 35 passed
+python -m pytest -q tests        # 46 passed
 ```
 
 Coverage:
@@ -143,7 +157,7 @@ Local (any machine with Docker):
 ```bash
 cp .env.example .env            # fill TELEGRAM_BOT_TOKEN, GROWW_ACCESS_TOKEN
 mkdir -p logs data
-docker compose run --rm tests   # 35 tests inside the image
+docker compose run --rm tests   # 46 tests inside the image
 docker compose up -d --build
 docker compose logs -f
 ```

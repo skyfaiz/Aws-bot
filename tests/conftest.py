@@ -43,7 +43,7 @@ def base_dir(tmp_path):
 @pytest.fixture
 def cfg(base_dir):
     c = yaml.safe_load((ROOT / "config" / "config.yaml").read_text(encoding="utf-8"))
-    c["api"]["access_token"] = "test-token"
+    c["api"].update(access_token="test-token", api_key="", api_secret="", totp_secret="")
     c["risk"]["stop_loss"]["value"] = 30.0     # tests do not depend on the tuned default
     c["candles"]["warmup_candles"] = 5
     c["candles"]["max_window"] = 50

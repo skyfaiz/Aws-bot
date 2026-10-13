@@ -6,7 +6,8 @@ import yaml
 
 _KEY_RE = re.compile(r"^(\s*)([A-Za-z_][\w]*)\s*:(.*)$")
 _VAL_RE = re.compile(r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^#]*?)(\s+#.*|\s*)$""")
-BLOCKED_PREFIXES = ("api.access_token", "paths.")
+SECRET_KEYS = ("api.access_token", "api.api_key", "api.api_secret", "api.totp_secret")
+BLOCKED_PREFIXES = SECRET_KEYS + ("paths.",)
 
 
 def flatten(d: dict, prefix: str = "") -> dict:

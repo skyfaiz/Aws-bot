@@ -189,7 +189,7 @@ def test_halftrend_strategy_emits_signals():
 # ── Groww client ──────────────────────────────────────────────────
 class FakeResp:
     def __init__(self, code=200, body=None):
-        self.status_code, self._b = code, body or {}
+        self.status_code, self._b, self.text = code, body or {}, ""
 
     def json(self):
         return self._b

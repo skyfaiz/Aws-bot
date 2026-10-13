@@ -31,8 +31,10 @@ def _expand(obj):
 
 
 def validate(cfg: dict, require_token: bool = True) -> None:
-    if require_token and not cfg["api"].get("access_token"):
-        raise ValueError("GROWW_ACCESS_TOKEN is not set (env var or .env file)")
+    api = cfg["api"]
+    has_creds = api.get("api_key") and (api.get("api_secret") or api.get("totp_secret"))
+    if require_token and not (api.get("access_token") or has_creds):
+        raise ValueError("Set GROWW_ACCESS_TOKEN, or GROWW_API_KEY with GROWW_API_SECRET (or GROWW_TOTP_SECRET)")
     if cfg["api"]["poll_interval_seconds"] <= 0:
         raise ValueError("api.poll_interval_seconds must be > 0")
     ins = cfg["instrument"]

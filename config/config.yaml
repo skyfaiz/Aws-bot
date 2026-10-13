@@ -1,6 +1,9 @@
 # ── Groww API ──────────────────────────────────────────────────────
 api:
-  access_token: "${GROWW_ACCESS_TOKEN}"   # injected from environment variable / .env
+  access_token: "${GROWW_ACCESS_TOKEN}"   # injected from environment variable / .env (optional if key+secret/TOTP below are set)
+  api_key: "${GROWW_API_KEY}"             # with api_secret (or totp_secret) the bot fetches a fresh access token itself
+  api_secret: "${GROWW_API_SECRET}"
+  totp_secret: "${GROWW_TOTP_SECRET}"     # optional: TOTP flow instead of api_secret
   base_url: "https://api.groww.in/v1"
   version: "1.0"
   poll_interval_seconds: 5

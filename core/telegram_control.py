@@ -9,7 +9,7 @@ import pandas as pd
 import yaml
 
 from core.config import parse_config
-from core.config_edit import BLOCKED_PREFIXES, coerce, flatten, get_leaf, set_yaml_value
+from core.config_edit import BLOCKED_PREFIXES, SECRET_KEYS, coerce, flatten, get_leaf, set_yaml_value
 from core.groww_client import GrowwAuthError
 from core.trade_log import TradeLog
 
@@ -24,7 +24,9 @@ HELP = """Commands
 /trades [n] - last n trades today (default 5)
 /config [section] - show settings
 /set <key> <value> - change a setting, e.g. /set risk.stop_loss.value 25
-/settoken <token> - update Groww access token
+/settoken <token> - set a Groww access token directly
+/setkeys <api_key> <api_secret> - set Groww API key + secret (token fetched automatically and renewed daily)
+/refreshtoken - fetch a new token now (after approving the key on the Groww Cloud API Keys page)
 /pause - stop opening new trades
 /resume - allow new trades again
 /squareoff - close the open position now"""
@@ -87,6 +89,10 @@ class Controller:
         }
         if cmd == "settoken":
             return self.set_token(args), True
+        if cmd == "setkeys":
+            return self.set_keys(args), True
+        if cmd == "refreshtoken":
+            return self.bot.refresh_token(), False
         if cmd not in fn:
             return "Unknown command. /help", False
         try:
@@ -170,7 +176,7 @@ class Controller:
         raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
         items = flatten(raw)
         prefix = args[0] if args else ""
-        lines = [f"{k} = {'***' if k == 'api.access_token' else v}" for k, v in items.items() if k.startswith(prefix)]
+        lines = [f"{k} = {'***' if k in SECRET_KEYS else v}" for k, v in items.items() if k.startswith(prefix)]
         return "\n".join(lines) or f"No settings match '{prefix}'. Sections: {', '.join(raw)}"
 
     # ── actions ────────────────────────────────────────────────────
@@ -193,8 +199,8 @@ class Controller:
         if len(args) < 2:
             return "Usage: /set <key> <value>   (see /config for keys)"
         key, raw_value = args[0], " ".join(args[1:])
-        if key == "api.access_token":
-            return "Use /settoken <token> for the access token."
+        if key in SECRET_KEYS:
+            return "Credentials can only be changed with /settoken or /setkeys."
         if key.startswith(BLOCKED_PREFIXES):
             return f"{key} cannot be changed remotely."
         b = self.bot
@@ -237,6 +243,17 @@ class Controller:
             b.set_token(token)
             b.auth_failed = False
         return "Access token updated (stored in .env, live immediately)." + note
+
+    def set_keys(self, args: list[str]) -> str:
+        if len(args) != 2:
+            return "Usage: /setkeys <api_key> <api_secret>"
+        key, secret = args
+        with self.bot.lock:
+            self._write_env("GROWW_API_KEY", key)
+            self._write_env("GROWW_API_SECRET", secret)
+            os.environ["GROWW_API_KEY"], os.environ["GROWW_API_SECRET"] = key, secret
+            result = self.bot.set_credentials(key, secret)
+        return "API key and secret saved to .env.\n" + result
 
     def _write_env(self, key: str, value: str) -> None:
         lines = self.env_path.read_text(encoding="utf-8").splitlines() if self.env_path.exists() else []
