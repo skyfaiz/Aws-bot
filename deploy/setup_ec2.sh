@@ -20,8 +20,8 @@ mkdir -p logs
 
 ./venv/bin/python -m pytest -q tests
 
-sudo cp deploy/tradingbot.service /etc/systemd/system/tradingbot.service
+sudo cp deploy/tradingbot.service deploy/tradingbot-telegram.service /etc/systemd/system/
 sudo cp deploy/tradingbot.logrotate /etc/logrotate.d/tradingbot
 sudo systemctl daemon-reload
-sudo systemctl enable tradingbot
-echo "Setup done. After editing .env run: sudo systemctl start tradingbot"
+sudo systemctl enable tradingbot-telegram   # bot + Telegram control (use "tradingbot" for the plain bot)
+echo "Setup done. After editing .env run: sudo systemctl start tradingbot-telegram"

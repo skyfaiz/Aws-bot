@@ -28,7 +28,11 @@ core/paper_trader.py       open/close, SL/TP modes, P&L, position (de)serialisat
 core/trade_log.py          logs/trades_YYYY-MM-DD.csv, metrics, summary
 strategies/                BaseStrategy, Signal, registry, HalfTrendStrategy (wraps existing halftrend.py)
 deploy/                    tradingbot.service, setup_ec2.sh, tradingbot.logrotate
-tests/                     19 pytest tests
+telegram_service.py        Telegram front-end; runs the bot in a background thread
+core/data_store.py         tick/candle/signal recorder with retention
+core/telegram_control.py   command logic (auth, status, set, settoken, pause...)
+core/config_edit.py        comment-preserving edits of config.yaml
+tests/                     35 pytest tests
 ```
 
 `halftrend.py` is unchanged.
@@ -46,11 +50,75 @@ tests/                     19 pytest tests
 - **ATR SL/TP**: uses `risk.assumed_delta` (0.5) to convert underlying ATR into an option-price distance.
 - Not implemented (from "future enhancements"): Flask health endpoint, holiday calendar, token auto-refresh, alerts.
 
+## Telegram service
+
+Run `python telegram_service.py` (or the `tradingbot-telegram` systemd unit) instead of `bot.py`; it runs the same bot plus Telegram control. Needs `TELEGRAM_BOT_TOKEN` (from @BotFather) in `.env`. Only one of the two services should run at a time (the unit files conflict on purpose).
+
+**Access**: send `/login 679902` (override with `TELEGRAM_PASSWORD` in `.env`) in a private chat. The login message is deleted, authorised chats are saved to `logs/telegram_auth.json`, and 5 wrong attempts lock that user out for 15 minutes. Unauthorised users get nothing but the login prompt.
+
+**Automatic messages**: entries (with SL/TP), exits (reason, trade and session P&L), session summary at 23:30, API auth failure / recovery, tick stalls, loop errors, service start. Set `telegram.notify_signals: true` for a message on every candle close.
+
+| Command | Action |
+|---|---|
+| `/status` | market, pause state, API health, price, candles, position, today's P&L |
+| `/position`, `/pnl`, `/trades [n]` | open position, P&L and metrics, last trades |
+| `/config [section]` | list settings (token masked) |
+| `/set <key> <value>` | change any setting in `config.yaml`, e.g. `/set risk.stop_loss.value 25`, `/set instrument.lots 2` |
+| `/settoken <token>` | update the Groww token (checked against Groww first, message deleted) |
+| `/pause`, `/resume` | stop / allow new entries (persists across restarts) |
+| `/squareoff` | close the open position on the next tick |
+| `/logout` | remove this chat |
+
+Notes:
+- `/set` keeps the file's comments and layout, validates the whole config, applies it to the running bot immediately, and rejects bad values without touching the file. Changing `candles.interval_minutes` clears the stored candles. SL/TP changes apply to new trades only. `paths.*` cannot be changed remotely.
+- **Token storage**: `/settoken` writes the token to `.env` (git-ignored), not into `config.yaml`, which is committed to git; `config.yaml` keeps `access_token: "${GROWW_ACCESS_TOKEN}"`, so the effect is the same without leaking the token to the repo.
+- While paused the bot still manages an open position (SL/TP, opposite signal, square-off) but opens nothing new.
+- Default `candles.warmup_candles` is now 5 (was 120); the other defaults are unchanged. HalfTrend's ATR smooths over 100 candles, so signals in the first hours are less reliable.
+- The service itself could not be run against Telegram here (no bot token): the command logic is covered by tests, and a start-up with a dummy token reaches Telegram and is rejected as expected.
+
+## Position sizing (lots)
+
+Before this change the bot always bought `instrument.lots` (fixed, default 1). Now:
+
+```
+equity     = paper.initial_capital_inr + all realised P&L (every logs/trades_*.csv)
+limit      = equity * risk.max_capital_pct / 100            (default 50)
+cost/lot   = option entry price * lot size (100)
+lots       = min(instrument.lots, largest n with n * cost/lot  <  limit)
+```
+
+- Trade value is always strictly below 50% of current equity (exactly 50% is rejected).
+- `instrument.lots` is the number you want; the cap only ever reduces it. Set it high (e.g. 100) to always trade the maximum the cap allows.
+- If even one lot is over the limit the entry is skipped and a message is logged/sent to Telegram.
+- Equity includes realised profit and loss, so the lot count shrinks after losses and grows after wins. Both settings can be changed from Telegram (`/set risk.max_capital_pct 40`, `/set instrument.lots 3`).
+- Example at Rs 1,00,000 capital and an option at Rs 200 (Rs 20,000 per lot): at most 2 lots (Rs 40,000). At Rs 250 (Rs 25,000 per lot): 1 lot, because 2 lots would be exactly 50%.
+
+## Historical data recorder
+
+Everything the bot sees is appended to daily CSVs in `data/` (git-ignored):
+
+| File | Content |
+|---|---|
+| `ticks_YYYY-MM-DD.csv` | every LTP poll: timestamp, symbol, price (underlying, plus the option while a position is open) |
+| `candles_YYYY-MM-DD.csv` | every sealed candle (including flat-filled gap candles with 0 ticks) |
+| `signals_YYYY-MM-DD.csv` | each strategy evaluation: signal, candle close, ATR, paused flag, open position |
+
+Files older than `data.retention_days` (default 30, minimum 7 enforced) are deleted at the start of each day; a file exactly 7 days old is always kept. Trade logs (`logs/trades_*.csv`) are never deleted. Disk errors are logged and never stop trading. Roughly 10k tick rows per symbol per day. Disable with `data.enabled: false`.
+
+## When does HalfTrend start calculating?
+
+- The indicator code (`halftrend.py`) runs over the whole candle window from the first candle on every evaluation; there is no separate start-up phase inside it.
+- The bot only evaluates the strategy once `candles.warmup_candles` candles are sealed (default 5, so at 09:40 on a fresh start with 5-minute candles). It is evaluated on every sealed candle after that.
+- Buy/Sell flags depend only on highs, lows and closes (the `amplitude` window and previous candle), not on ATR, so `atr_period` has no effect on signals. It only affects the channel bands and `atr` stop-loss/take-profit modes. (Checked: signals are identical for `atr_period` 1 and 100.)
+- The indicator keeps a trend state that starts as "up" on the first candle it sees. A different start point can therefore give a different flag for the first few candles. On random-walk test data, runs started at different points agreed with the full-history run after at most ~13 candles. So signals in roughly the first 15 candles (about 75 minutes) after a cold start are less reliable than later ones; `candles.persist` keeps history across restarts and days, so this normally happens only on the very first run.
+- Once more than `candles.max_window` (500) candles exist the oldest are dropped, which moves the start point in the same way.
+- Earliest possible signal in the code is the 2nd candle; with the default warmup the earliest evaluated candle is the 5th.
+
 ## Testing
 
 ```
 pip install -r requirements.txt
-python -m pytest -q tests        # 19 passed
+python -m pytest -q tests        # 35 passed
 ```
 
 Coverage:

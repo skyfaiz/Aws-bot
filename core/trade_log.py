@@ -23,6 +23,13 @@ class TradeLog:
         if self.path.exists():
             self.pnls = pd.read_csv(self.path)["net_pnl_inr"].astype(float).tolist()
 
+    @staticmethod
+    def all_time_pnl(log_dir: str | Path) -> float:
+        total = 0.0
+        for f in Path(log_dir).glob("trades_*.csv"):
+            total += float(pd.read_csv(f)["net_pnl_inr"].sum())
+        return total
+
     @property
     def cumulative(self) -> float:
         return float(sum(self.pnls))

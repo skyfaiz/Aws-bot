@@ -21,12 +21,12 @@ instrument:
   option_type_on_sell: "PE"
   strike_selection: "ATM"                # ATM | 1_OTM | 2_OTM | 1_ITM
   strike_interval: 50
-  lots: 1
+  lots: 1                                # lots wanted per trade; reduced if it would breach risk.max_capital_pct
 
 # ── Candle settings ─────────────────────────────────────────────────
 candles:
   interval_minutes: 5
-  warmup_candles: 120
+  warmup_candles: 5
   max_window: 500
   persist: true                          # keep candles on disk so restarts / next day stay warm
   max_stale_hours: 72                    # ignore persisted candles older than this
@@ -41,10 +41,11 @@ strategy:
 
 # ── Risk management ─────────────────────────────────────────────────
 risk:
+  max_capital_pct: 50.0                  # a trade's value (price x lot size x lots) must stay below this % of equity
   assumed_delta: 0.5                     # used by atr mode to map underlying move -> option move
   stop_loss:
     mode: "fixed_pct"                    # none | fixed_inr | fixed_pct | atr
-    value: 30.0
+    value: 7.5
   take_profit:
     mode: "reward_risk"                  # none | fixed_inr | fixed_pct | atr | reward_risk
     value: 2.0
@@ -63,6 +64,16 @@ session:
 paper:
   initial_capital_inr: 100000.0
 
+# ── Historical data recorder (ticks, candles, signals) ──────────────
+data:
+  enabled: true
+  dir: "data"
+  retention_days: 30                     # older files are deleted (minimum 7 enforced)
+
 # ── Paths ───────────────────────────────────────────────────────────
 paths:
   log_dir: "logs"
+
+# ── Telegram service (telegram_service.py) ──────────────────────────
+telegram:
+  notify_signals: false                  # message on every candle close with its signal

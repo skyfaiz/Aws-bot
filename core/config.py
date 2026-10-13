@@ -44,6 +44,10 @@ def validate(cfg: dict, require_token: bool = True) -> None:
         raise ValueError("instrument.strike_selection must be ATM|1_OTM|2_OTM|1_ITM")
     if int(ins["lots"]) < 1:
         raise ValueError("instrument.lots must be >= 1")
+    if not 0 < float(cfg["risk"]["max_capital_pct"]) <= 100:
+        raise ValueError("risk.max_capital_pct must be > 0 and <= 100")
+    if int(cfg["data"]["retention_days"]) < 7:
+        raise ValueError("data.retention_days must be >= 7")
     sl, tp = cfg["risk"]["stop_loss"], cfg["risk"]["take_profit"]
     if sl["mode"] not in SL_MODES:
         raise ValueError(f"risk.stop_loss.mode must be one of {sorted(SL_MODES)}")
@@ -60,8 +64,11 @@ def validate(cfg: dict, require_token: bool = True) -> None:
         raise ValueError("session times must satisfy open < trade start < trade end <= squareoff <= close")
 
 
-def load_config(path: str | Path = "config/config.yaml", require_token: bool = True) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = _expand(yaml.safe_load(f))
+def parse_config(text: str, require_token: bool = True) -> dict:
+    cfg = _expand(yaml.safe_load(text))
     validate(cfg, require_token)
     return cfg
+
+
+def load_config(path: str | Path = "config/config.yaml", require_token: bool = True) -> dict:
+    return parse_config(Path(path).read_text(encoding="utf-8"), require_token)

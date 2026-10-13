@@ -94,11 +94,11 @@ class PaperTrader:
         return sl, tp
 
     def open_position(self, contract: OptionContract, option_ltp: float, underlying_ltp: float,
-                      atr: float, signal: Signal, now: datetime) -> OpenPosition:
+                      atr: float, signal: Signal, now: datetime, lots: int | None = None) -> OpenPosition:
         if self.position:
             raise RuntimeError("position already open")
         sl, tp = self.compute_levels(option_ltp, atr)
-        self.position = OpenPosition(contract, now, option_ltp, underlying_ltp, atr, self.lots, sl, tp, signal)
+        self.position = OpenPosition(contract, now, option_ltp, underlying_ltp, atr, lots or self.lots, sl, tp, signal)
         return self.position
 
     def has_open_position(self) -> bool:

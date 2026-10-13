@@ -3,4 +3,5 @@ numpy>=1.24
 PyYAML>=6.0
 requests>=2.31
 tzdata
+python-telegram-bot==20.7
 pytest>=7.0

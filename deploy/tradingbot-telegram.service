@@ -1,0 +1,19 @@
+[Unit]
+Description=MCX Crude Oil Paper Trading Bot + Telegram control
+After=network-online.target
+Wants=network-online.target
+Conflicts=tradingbot.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tradingbot
+ExecStart=/home/ubuntu/tradingbot/venv/bin/python telegram_service.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+EnvironmentFile=/home/ubuntu/tradingbot/.env
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
